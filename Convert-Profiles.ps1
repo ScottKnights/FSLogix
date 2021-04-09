@@ -66,6 +66,9 @@
     .PARAMETER noprogress
 	Switch to disable progress bar. Alias -NP
 
+    .PARAMETER encoding
+	Encoding of the log file. Default is UNICODE.
+
     .INPUTS
 	None
 
@@ -89,6 +92,11 @@
 		Added option to select VHD or VHDX.
 		Added option to select forward or reversed folder naming.
 		Added option for verbose FRX output.
+
+	Version:	2.20210407.1
+		Function to output to screen and log instead of using Tee-Object.
+			Cannot select encoding with Tee-Object and it varies between Powershell versions, producing inconsistent logfile.
+		Added encoding parameter
 
     .EXAMPLE
         .\convert-profiles -vhdpath \\server\share
@@ -181,13 +189,31 @@ Param(
 
     [Parameter()]
     [Alias("NP")]
-    [switch] $noprogress
+    [switch] $noprogress,
+
+    [Parameter()]
+    [String] $encoding="unicode"
 )
 #endregion Parameters
 
 # ============================================================================
 #region Functions
 # ============================================================================
+# Write inputobject to screen and log file. Allows specifying encoding, unlike Tee-Object.
+function out-log {
+	param ( [Parameter(ValueFromPipeline = $true)]
+		[PSCustomObject[]]
+		$iobjects
+	)
+
+	process {
+		foreach ($iobject in $iobjects)
+	        {
+			$iobject|add-content $logfile -passthru -Encoding $encoding |write-output
+	        }
+	}
+}
+
 function convert-profile {
 
 	# Get Username as mandatory parameter
@@ -200,7 +226,7 @@ function convert-profile {
 	try {
 		$SID=(get-aduser -identity $username).sid.value
 	} catch {
-		"$username - Not found in Active Directory"|Tee-Object -FilePath $logfile -append
+		"$username - Not found in Active Directory."|out-log
 		Return
 	}
 
@@ -208,7 +234,7 @@ function convert-profile {
 	$ErrorActionPreference="Stop"
 	try {
 		query user $username 2>&1|out-null
-		"$username - Currently logged in"|Tee-Object -FilePath $logfile -append
+		"$username - Currently logged in."|out-log
 		Return
 	} catch {
 		$ErrorActionPreference="Continue"
@@ -220,14 +246,14 @@ function convert-profile {
 		$profsrc=Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$sid" -Name ProfileImagePath
 		$ErrorActionPreference="Continue"
 	} catch {
-		"$username - No profile path value in the registry"|Tee-Object -FilePath $logfile -append
+		"$username - No profile path value in the registry."|out-log
 		return
 	}
 
 	# Return if the profile path folder does not exist. Delete orphaned key if $cleanorphan is true
 	$profpath=$profsrc.ProfileImagePath
 	if (-NOT (test-path $profPath)) {
-		"$username - Profile path folder does not exist. Orphaned Profile"|Tee-Object -FilePath $logfile -append
+		"$username - Profile path folder does not exist. Orphaned Profile."|out-log
 		if ($cleanorphan) {
 			remove-item -path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$sid" -force -erroraction silentlycontinue|out-null
 		}
@@ -239,7 +265,7 @@ function convert-profile {
 	try {
 		[IO.File]::OpenWrite($ntuserdat).close()
 	 } catch {
-		"$username - NTUSER.DAT is locked"|Tee-Object -FilePath $logfile -append
+		"$username - NTUSER.DAT is locked."|out-log
 		return
 	}
 
@@ -259,11 +285,11 @@ function convert-profile {
 
 	# Return if container file already exists
 	if (test-path $fullpath) {
-		"$username - FSLogix container already exists"|Tee-Object -FilePath $logfile -append
+		"$username - FSLogix container already exists."|out-log
 		Return
 	}
 
-	"$username - Converting profile to container"|Tee-Object -FilePath $logfile -append
+	"$username - Converting profile to container."|out-log
 	# Create Folder
 	mkdir $fldname -erroraction silentlycontinue |out-null
 
@@ -276,23 +302,23 @@ function convert-profile {
 	# Convert profile using FRX.EXE
 	try {
 		if ($verbosefrx) {
-			& $frxpath copy-profile -filename "$fullpath" -sid "$sid" -dynamic 1 -size-mbs="$vhdsize" -verbose|Tee-Object -FilePath $logfile -append
+			& $frxpath copy-profile -filename "$fullpath" -sid "$sid" -dynamic 1 -size-mbs="$vhdsize" -verbose|out-log
 		} else {
 			& $frxpath copy-profile -filename "$fullpath" -sid "$sid" -dynamic 1 -size-mbs="$vhdsize" 2>&1 |out-null
 		}
 		$returncode=$lastexitcode
 		if ($returncode -ne 0) {
-			"$username - FRX return code did not equal 0. Trying again."|Tee-Object -FilePath $logfile -append
+			"$username - FRX return code did not equal 0. Trying again."|out-log
 			& $frxpath copy-profile -filename "$fullpath" -sid "$sid" -dynamic 1 -size-mbs="$vhdsize" 2>&1 |out-null
 			$returncode=$lastexitcode
 			if ($returncode -ne 0) {
-				"$username - FRX return code still did not equal 0 - Investigate."|Tee-Object -FilePath $logfile -append
+				"$username - FRX return code still did not equal 0 - Investigate."|out-log
 				remove-item $fldname -erroraction silentlycontinue |out-null
 				return
 			}
 		}
 	} catch {
-		"$username - FRX returned an error - Investigate."|Tee-Object -FilePath $logfile -append
+		"$username - FRX returned an error - Investigate."|out-log
 		remove-item $fldname -erroraction silentlycontinue |out-null
 		return
 	}
@@ -315,7 +341,7 @@ function convert-profile {
 		try {
 			Add-ADGroupMember -identity $adgroup -members $username -erroraction stop
 		} catch {
-			"$username - cannot add user to group $adgroup."|Tee-Object -FilePath $logfile -append
+			"$username - cannot add user to group $adgroup."|out-log
 		}
 	}
 }
@@ -330,7 +356,7 @@ $ProgressPreference="silentlycontinue"
 # Check that we can create the log file
 $start=get-date
 try {
-	set-Content -Path $logfile -encoding unicode -Value "Start run at $start" -erroraction stop
+	set-Content -Path $logfile -encoding $encoding -Value "Start run at $start" -erroraction stop
 } catch {
 	write-output "Cannot create log file $logfile. Check path and permissions. Exiting."
 	Return
@@ -340,6 +366,7 @@ $params=@(
 "",
 "Parameters",
 "logfile:	$logfile",
+"Encoding:	$encoding",
 "vhdpath:	$vhdpath",
 "userlist:	$userlist",
 "searchbase:	$searchbase",
@@ -354,11 +381,11 @@ $params=@(
 "frxpath:	$frxpath",
 ""
 )
-$params|Tee-Object -FilePath $logfile -append
+$params|out-log
 
 # Test if container share path exists
 if (-NOT (test-path $vhdpath)) {
-	"FSLogix container share path is invalid. Exiting."|Tee-Object -FilePath $logfile -append
+	"FSLogix container share path is invalid. Exiting."|out-log
 	Return
 }
 
@@ -367,13 +394,13 @@ try {
 	new-item -path $vhdpath -name "testfile" -force -erroraction stop|out-null
 	remove-item -path $vhdpath"\testfile" -force -erroraction stop|out-null
 } catch {
-	"Cannot write to the FSLogix container share. Check path and permissions. Exiting."|Tee-Object -FilePath $logfile -append
+	"Cannot write to the FSLogix container share. Check path and permissions. Exiting."|out-log
 	Return
 }
 
 # Test if FRX.EXE exists
 if (-NOT (test-path $frxpath)) {
-	"FRX.EXE is missing. FSLogix is probably not installed. Exiting."|Tee-Object -FilePath $logfile -append
+	"FRX.EXE is missing. FSLogix is probably not installed. Exiting."|out-log
 	Return
 }
 
@@ -381,13 +408,13 @@ if (-NOT (test-path $frxpath)) {
 $rsatad=Get-WindowsFeature *RSAT-AD-PowerShell*
 if (-not ($rsatad.installed)) {
 	if ($installrsat) {
-		"RSAT-AD-PowerShell not installed. Install requested. Attempting installation."|Tee-Object -FilePath $logfile -append
+		"RSAT-AD-PowerShell not installed. Install requested. Attempting installation."|out-log
 		try {
 			$ProgressPreference="continue"
 			Install-WindowsFeature RSAT-AD-PowerShell|out-null
 			$ProgressPreference="silentlycontinue"
 		} catch {
-			"Error installing RSAT-AD-PowerShell."|Tee-Object -FilePath $logfile -append
+			"Error installing RSAT-AD-PowerShell."|out-log
 		}
 	}
 }
@@ -395,7 +422,7 @@ if (-not ($rsatad.installed)) {
 # Test if RSAT-AD-PowerShell is installed (again!).
 $rsatad=Get-WindowsFeature *RSAT-AD-PowerShell*
 if (-not ($rsatad.installed)) {
-	"Active Directory module for Windows (RSAT-AD-PowerShell) is not installed. Exiting."|Tee-Object -FilePath $logfile -append
+	"Active Directory module for Windows (RSAT-AD-PowerShell) is not installed. Exiting."|out-log
 	Return
 } else {
 	import-module activedirectory
@@ -409,9 +436,9 @@ restart-service wsearch -erroraction silentlycontinue|out-null
 if ($userlist) {
 	# Get list of usernames from a text file. Useful for testing/piloting.
 	# Test if userlist file exists
-	"Getting userlist from text file $userlist."|Tee-Object -FilePath $logfile -append
+	"Getting userlist from text file $userlist."|out-log
 	if (-NOT (test-path $userlist)) {
-		"File $userlist is missing. Exiting."|Tee-Object -FilePath $logfile -append
+		"File $userlist is missing. Exiting."|out-log
 		Return
 	}
 	# Get Userlist from file
@@ -419,7 +446,7 @@ if ($userlist) {
 } elseif ($searchbase) {
 	# Get Userlist from specified OU in AD. Get all users if searchbase = root.
 	# Probably not so useful now we have parselocal, but already in place so will leave it.
-	"Getting userlist from Active Directory, Searchbase $searchbase."|Tee-Object -FilePath $logfile -append
+	"Getting userlist from Active Directory, Searchbase $searchbase."|out-log
 	try {
 		if ($searchbase -eq "root") {
 			$userobjects=get-aduser -filter * -erroraction stop
@@ -427,14 +454,14 @@ if ($userlist) {
 			$userobjects=get-aduser -filter * -searchbase $searchbase -erroraction stop
 		}
 	} catch {
-		"Unable to get users from Active Directory. Exiting."|Tee-Object -FilePath $logfile -append
+		"Unable to get users from Active Directory. Exiting."|out-log
 	}
 	$users=$userobjects.samaccountname
 } else {
 	# Get Userlist by parsing SIDs from ProfileList key. Probably most useful option.
 	# Yes, we are converting SID to username, then converting it back to a SID again in the function.
 	# Thought of just passing the SID, but that would have meant too much messing with the function.
-	"Getting userlist from ProfileList key in the registry."|Tee-Object -FilePath $logfile -append
+	"Getting userlist from ProfileList key in the registry."|out-log
 	$domain=$env:userdomain
 	$users=@()
 	$keys=(Get-ChildItem -path "hklm:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList").name
@@ -444,7 +471,7 @@ if ($userlist) {
 		try {
 			$objUser = $objSID.Translate( [System.Security.Principal.NTAccount])
 		} catch {
-			"$SID is invalid"|Tee-Object -FilePath $logfile -append
+			"SID $SID is invalid."|out-log
 		}
 		# We only want domain accounts
 		$username=$objUser.Value
