@@ -6,7 +6,7 @@
 	Converts profiles from a server to FSLogix containers using FRX.EXE.
 	Will extract a list of usernames from the ProfileList registry key, unless the -userlist or -searchbase options are specified.
 	The -userlist option specifies a text file containing a list of samAccountnames to convert.
-	The -searchbase option species an OU containing the list of user accounts to convert. Set to root to convert all user accounts in the domain.
+	The -searchbase option specifies an OU containing the user accounts to convert. Set to root to convert all user accounts in the domain.
 	If both the -userlist and -searchbase options are specified, -userlist will be used and -searchbase ignored.
 	Once a user's profile has been converted, the user will be made the owner and granted full control of the folder and VHD/VHDX file.
 	Run on the terminal server containing the profiles.
@@ -16,7 +16,7 @@
 		User is logged on
 		User does not have a profile on the server
 		NTUSER.DAT is locked
-		User already has a VHD file
+		User already has a VHD/VHDX file
 
 	Active Directory module for Windows (RSAT-AD-PowerShell) must be installed.
 	Script will exit if it is not unless the -installrsat switch is specified, then it will attempt to install it.
@@ -66,6 +66,9 @@
     .PARAMETER noprogress
 	Switch to disable progress bar. Alias -NP
 
+    .PARAMETER selectprofiles
+	Switch to allow interactive selection of profiles to process from the user list.
+
     .PARAMETER encoding
 	Encoding of the log file. Default is UNICODE.
 
@@ -94,45 +97,62 @@
 		Added option for verbose FRX output.
 
 	Version:	2.20210407.1
-		Function to output to screen and log instead of using Tee-Object.
+		Added out-log function to replace use of Tee-Object to send output to the screen and log file.
 			Cannot select encoding with Tee-Object and it varies between Powershell versions, producing inconsistent logfile.
-		Added encoding parameter
+		Added encoding parameter.
+
+	Version:	2.20210430.1
+		Added -selectprofiles switch to allow interactive selection of profiles from the userlist.
+		Changes to progress visibility.
+		Minor changes to comments.
 
     .EXAMPLE
         .\convert-profiles -vhdpath \\server\share
 
 	Description:
-	Processes users with a profile on the server the script is running from.
-	If the user has a profile on the server, it is converted to a VHD file in \\server\share.
-	VHD folder is created in <SID>.<USERNAME> format.
+	Get a list of users with a profile on the server the script is running from.
+	Each user's profile is converted to a VHD file in \\server\share.
+	The folder containing the VHD file is created in <SID>.<USERNAME> format.
+
+    .EXAMPLE
+        .\convert-profiles -vhdpath \\server\share -selectprofiles -noprogress
+
+	Description:
+	Get a list of users with a profile on the server the script is running from.
+	Allow interactive selection from this list before beginning conversion.
+	Each selected user's profile is converted to a VHD file in \\server\share.
+	The folder containing the VHD file is created in <SID>.<USERNAME> format.
+	Suppress the progress bar.
 
 
     .EXAMPLE
         .\convert-profiles -vhdpath \\server\share -searchbase "root"
 
 	Description:
-	Processes all users from the active directory domain.
+	Get a list of all users from the active directory domain.
 	If the user has a profile on the server, it is converted to a VHD file in \\server\share.
-	VHD folder is created in <SID>.<USERNAME> format.
+	The folder containing the VHD file is created in <SID>.<USERNAME> format.
 
     .EXAMPLE
         .\convert-profiles -vhdpath \\server\share -searchbase "OU=Users,OU=Company,DC=domain,DC=com" -vhdx -reversefolder -adgroup "RL-FSLogix Users"
 
 	Description:
-	Processes users from organisational unit OU=Users,OU=Company,DC=domain,DC=com.
+	Get a list of users from the organisational unit OU=Users,OU=Company,DC=domain,DC=com.
 	If the user has a profile on the server, it is converted to a VHDX file in \\server\share.
-	VHDX file is created in reversed <USERNAME>.<SID> format.
-	Users are added to AD group RL-FSLogix Users after they are successfully processed.
+	The folder containing the VHDX file is created in reversed <USERNAME>.<SID> format.
+	Users are added to the AD group RL-FSLogix Users after their profile is successfully converted.
 
     .EXAMPLE
         .\convert-profiles -vhdpath \\server\share -userlist ".\migusers.txt" -verbosefrx -installrsat -cleanorphan
 
 	Description:
-	Processes users from text file ".\migusers.txt".
+	Get a list of users from text file ".\migusers.txt".
 	If the user has a profile on the server, it is converted to a VHD file in \\server\share
+	The folder containing the VHD file is created in <SID>.<USERNAME> format.
 	Verbose output from FRX.EXE is shown.
 	If the Windows feature RSAT-AD-PowerShell is missing, try to install it.
 	Orphaned profile registry keys (no matching profile folder) are deleted.
+
 #>
 
 # ============================================================================
@@ -192,6 +212,10 @@ Param(
     [switch] $noprogress,
 
     [Parameter()]
+    [Alias("SP")]
+    [switch] $selectprofiles,
+
+    [Parameter()]
     [String] $encoding="unicode"
 )
 #endregion Parameters
@@ -214,6 +238,7 @@ function out-log {
 	}
 }
 
+# Main function to process each user. Test if they can be converted, then convert the profile using FRX.EXE.
 function convert-profile {
 
 	# Get Username as mandatory parameter
@@ -351,7 +376,8 @@ function convert-profile {
 #region Execute
 # ============================================================================
 clear-host
-$ProgressPreference="silentlycontinue"
+$InitProgressPreference=$global:ProgressPreference
+$global:ProgressPreference="silentlycontinue"
 
 # Check that we can create the log file
 $start=get-date
@@ -377,11 +403,14 @@ $params=@(
 "reversefolder:	$reversefolder",
 "verbosefrx:	$verbosefrx",
 "installrsat:	$installrsat",
+"selectprofiles:	$selectprofiles",
 "noprogress:	$noprogress",
 "frxpath:	$frxpath",
 ""
 )
 $params|out-log
+
+"Testing Pre-requisites."|out-log
 
 # Test if container share path exists
 if (-NOT (test-path $vhdpath)) {
@@ -410,9 +439,9 @@ if (-not ($rsatad.installed)) {
 	if ($installrsat) {
 		"RSAT-AD-PowerShell not installed. Install requested. Attempting installation."|out-log
 		try {
-			$ProgressPreference="continue"
+			$global:ProgressPreference="continue"
 			Install-WindowsFeature RSAT-AD-PowerShell|out-null
-			$ProgressPreference="silentlycontinue"
+			$global:ProgressPreference="silentlycontinue"
 		} catch {
 			"Error installing RSAT-AD-PowerShell."|out-log
 		}
@@ -422,19 +451,20 @@ if (-not ($rsatad.installed)) {
 # Test if RSAT-AD-PowerShell is installed (again!).
 $rsatad=Get-WindowsFeature *RSAT-AD-PowerShell*
 if (-not ($rsatad.installed)) {
-	"Active Directory module for Windows (RSAT-AD-PowerShell) is not installed. Exiting."|out-log
+	"Active Directory module for Windows (RSAT-AD-PowerShell) is not installed. Use the -installrsat switch to try install the Feature. Exiting."|out-log
 	Return
 } else {
 	import-module activedirectory
-	$ProgressPreference="continue"
+	$global:ProgressPreference="continue"
 }
 
 # Restart Search service. Locked search indexes cause issues.
-restart-service wsearch -erroraction silentlycontinue|out-null
+"Restarting Search Service."|out-log
+restart-service wsearch -erroraction silentlycontinue -WarningAction silentlycontinue
 
 # Get users from local profiles, text file or AD.
 if ($userlist) {
-	# Get list of usernames from a text file. Useful for testing/piloting.
+	# Get a list of usernames from a text file. Useful for testing/piloting.
 	# Test if userlist file exists
 	"Getting userlist from text file $userlist."|out-log
 	if (-NOT (test-path $userlist)) {
@@ -442,9 +472,9 @@ if ($userlist) {
 		Return
 	}
 	# Get Userlist from file
-	$users=get-content $userlist
+	$tempusers=get-content $userlist
 } elseif ($searchbase) {
-	# Get Userlist from specified OU in AD. Get all users if searchbase = root.
+	# Get the userlist from a specified OU in AD. Get all users if searchbase = root.
 	# Probably not so useful now we have parselocal, but already in place so will leave it.
 	"Getting userlist from Active Directory, Searchbase $searchbase."|out-log
 	try {
@@ -456,14 +486,14 @@ if ($userlist) {
 	} catch {
 		"Unable to get users from Active Directory. Exiting."|out-log
 	}
-	$users=$userobjects.samaccountname
+	$tempusers=$userobjects.samaccountname
 } else {
-	# Get Userlist by parsing SIDs from ProfileList key. Probably most useful option.
-	# Yes, we are converting SID to username, then converting it back to a SID again in the function.
+	# Get the userlist by parsing SIDs from the ProfileList key. Probably the most useful option.
+	# Yes, we are converting SID to username, then converting it back to a SID again in the convert-profile function.
 	# Thought of just passing the SID, but that would have meant too much messing with the function.
 	"Getting userlist from ProfileList key in the registry."|out-log
 	$domain=$env:userdomain
-	$users=@()
+	$tempusers=@()
 	$keys=(Get-ChildItem -path "hklm:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList").name
 	foreach ($key in $keys) {
 		$sid=$key.Replace("HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\", [string]::Empty)
@@ -477,9 +507,16 @@ if ($userlist) {
 		$username=$objUser.Value
 		if ($username -match $domain) {
 			$user=$username.replace("$domain\",[string]::Empty)
-			$users += $user
+			$tempusers += $user
 		}
 	}
+}
+
+# Allow interactive selection of profiles to convert if -selectprofiles switch used
+If ($selectprofiles) {
+	$users=$tempusers|out-gridview -OutputMode Multiple -title "Select profile(s) to convert"
+} else {
+	$users=$tempusers
 }
 
 # Initialise progress bar
@@ -488,6 +525,10 @@ $start=get-date
 $secondsElapsed = (Get-Date) - $start
 $numusers=$users.count
 $counter=0
+
+if ($noprogress) {
+	$global:ProgressPreference="silentlycontinue"
+}
 
 # Process each user in the userlist
 foreach ($user in $users) {
@@ -503,9 +544,8 @@ foreach ($user in $users) {
 	if ($secondsRemaining) {
         	$progressParameters.SecondsRemaining = $secondsRemaining
 	}
-	if (-NOT ($noprogress)) {
-		Write-Progress @progressParameters
-	}
+
+	Write-Progress @progressParameters
 
 	convert-profile $user
 
@@ -513,4 +553,7 @@ foreach ($user in $users) {
 	$secondsElapsed = (Get-Date)-$start
 	$secondsRemaining = ($secondsElapsed.TotalSeconds / $counter) * ($numusers - $counter)
 }
+
+$global:ProgressPreference=$InitProgressPreference
+
 #endregion Execute
