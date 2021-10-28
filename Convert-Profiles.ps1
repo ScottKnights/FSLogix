@@ -67,7 +67,7 @@
 	Switch to disable progress bar. Alias -NP
 
     .PARAMETER selectprofiles
-	Switch to allow interactive selection of profiles to process from the user list.
+	Switch to allow interactive selection of profiles to process from the user list. Alias -SP.
 
     .PARAMETER encoding
 	Encoding of the log file. Default is UNICODE.
