@@ -21,7 +21,7 @@
 	Switch to allow interactive selection of profiles to process from the user list.
 
     .PARAMETER logfile
-	Target path to logfile. Defaults to .\profconv.log. Alias -LF.
+	Target path to logfile. Defaults to .\exprof.log. Alias -LF.
 
     .INPUTS
 	None
