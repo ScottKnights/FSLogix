@@ -49,7 +49,7 @@ Param(
     [Alias("PP")]
     [String] $profpath,
 
-    [Parameter(Mandatory=$true,Position=0)]
+    [Parameter(Mandatory=$true,Position=1)]
     [Alias("DP")]
     [String] $destpath,
 
