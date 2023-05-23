@@ -5,6 +5,10 @@
     .DESCRIPTION
 	Export selected files/folders from FSLogix profile containers.
 
+	Mount each profile container discovered in the source profile path as a drive letter using Diskpart.
+	If the SelectProfiles switch is specified, the discovered containers are displayed in GridView. Only selected profiles will be processed.
+	After each container is mounted, the selected files/folders will be copied to a subfolder in the destination path using RoboCopy.
+
     .PARAMETER ProfilePath
         Mandatory. Target path that hosts the FSLogix Profile Containers.
 
@@ -15,10 +19,10 @@
 	Drive letter to map the container to. Defaults to P. Select something else if P is already in use.
 
     .PARAMETER Recurse
-	Switch to recurse folders in robocopy. Adds /S option to robocopy command. Takes precedence over recurseempty if both are specified.
+	Switch to recurse folders in robocopy. Adds /S option to the robocopy command. Takes precedence over RecurseEmpty if both are specified.
 
     .PARAMETER RecurseEmpty
-	Switch to recurse all folders in robocopy, including empty ones. Adds /E option to robocopy command.
+	Switch to recurse all folders in robocopy, including empty ones. Adds /E option to the robocopy command.
 
     .PARAMETER Folders
         Array of folder names to export. Default is documents and downloads.
@@ -27,7 +31,7 @@
         Array of file names to export. Default is all files in the selected folders.
 
     .PARAMETER ExcludeFiles
-        Array of file names to exclude from export. Default is desktop.ini and thumbs.db.
+        Array of file names to exclude from the export. Default is desktop.ini and thumbs.db.
 
     .PARAMETER SelectProfiles
 	Switch to allow interactive selection of profiles to process from the user list.
@@ -48,6 +52,8 @@
 	V 2.20230522.1
 		Added option to also select files to include/exclude and whether to recurse.
 		Rename to use approved verb.
+	V 2.20230523.1
+		Comment changes and tidy up.
 
     .EXAMPLE
 	Export-DataFromProfiles.ps1 -ProfilePath "\\server\share" -DestinationPath "d:\export" -RecurseEmpty -DriveLetter K -Logfile C:\Temp\Mylog.txt
@@ -137,12 +143,12 @@ Function Export-Profile {
 		$Recursion="/e"
 	}
 
-	[string]$VHD=$Container.FullName
-	[string]$Profile=$Container.Name -replace "Profile_", "" -replace ".vhdx","" -replace ".vhd",""
+	[String]$VHD=$Container.FullName
+	[String]$Profile=$Container.Name -replace "Profile_", "" -replace ".vhdx","" -replace ".vhd",""
 	# Set diskpart commands
-	$Attach = "sel vdisk file=`"$VHD`"`r`nattach vdisk"
-	$Assign = "sel vdisk file=`"$VHD`"`r`nsel part 1`r`nassign letter=$driveletter"
-	$Detach = "sel vdisk file`"$VHD`"`r`ndetach vdisk"
+	[String]$Attach = "sel vdisk file=`"$VHD`"`r`nattach vdisk"
+	[String]$Assign = "sel vdisk file=`"$VHD`"`r`nsel part 1`r`nassign letter=$driveletter"
+	[String]$Detach = "sel vdisk file`"$VHD`"`r`ndetach vdisk"
 	"Processing $VHD."|Out-Log
 
 	# Export data from profile
@@ -155,9 +161,9 @@ Function Export-Profile {
 	# Create the destination path and copy files
 
 	Foreach ($Folder in $Folders) {
-		$SourcePath="$driveletter"+":\profile\"+$folder
+		[String]$SourcePath="$driveletter"+":\profile\"+$folder
 		$SourcePath |Out-Log
-		$Destination=$DestinationPath+"\"+$Profile+"\"+$Folder
+		[String]$Destination=$DestinationPath+"\"+$Profile+"\"+$Folder
 		$Destination |Out-Log
 		robocopy "$SourcePath" "$DestinationPath\$Profile\$Folder" $Files $Recursion /copy:dat /xj /xf $ExcludeFiles /r:1 /w:1 /np |Out-Log
 	}
@@ -173,10 +179,10 @@ Function Export-Profile {
 #region Execute
 # ============================================================================
 Clear-Host
-$Encoding="ASCII"
-$InitProgressPreference=$global:ProgressPreference
+[String]$Encoding="ASCII"
+[System.Enum]$InitProgressPreference=$global:ProgressPreference
 # Check that we can create the log file
-$Start=Get-Date
+[DateTime]$Start=Get-Date
 Try {
 	Set-Content -Path $LogFile -Encoding $Encoding -Value "Start run at $start" -ErrorAction Stop
 } Catch {
@@ -200,7 +206,7 @@ $Params=@(
 "DriveLetter:		$DriveLetter",
 ""
 )
-$params|Out-Log
+$Params|Out-Log
 
 # Test if container share path exists
 If (-NOT (Test-Path -LiteralPath $ProfilePath)) {
@@ -234,9 +240,10 @@ Try {
 }
 
 # Get VHD/VHDXs from profile path
-$TempContainers=Get-ChildItem $ProfilePath -Recurse | Where-Object {($_.Extension -Match ".vhd" -or $_.Extension -eq ".vhdx")}
+[System.Array]$TempContainers=Get-ChildItem $ProfilePath -Recurse | Where-Object {($_.Extension -Match ".vhd" -or $_.Extension -eq ".vhdx")}
+[System.Array]$Containers=@()
 
-# Allow interactive selection of VHD files to convert if -selectvhd switch used
+# Allow interactive selection of VHD files to convert if -SelectProfiles switch used
 If ($SelectProfiles) {
 	$Containers=$TempContainers|Out-GridView -OutputMode Multiple -Title "Select containers to export data from"
 } else {
@@ -244,11 +251,13 @@ If ($SelectProfiles) {
 }
 
 # Initialise progress bar
-[nullable[double]]$SecondsRemaining = $null
-$Start=Get-Date
-$SecondsElapsed = (Get-Date) - $start
-$VHDCount=$containers.count
-$Counter=0
+[Nullable[Double]]$SecondsRemaining = $null
+[DateTime]$Start=Get-Date
+[TimeSpan]$SecondsElapsed = (Get-Date) - $start
+[Int32]$VHDCount=$containers.count
+[Int32]$Counter=0
+[Int32]$PercentComplete=0
+[Double]$SecondsRemaining=0
 
 $Global:ProgressPreference="continue"
 
