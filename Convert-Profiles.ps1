@@ -4,6 +4,13 @@
 
     .DESCRIPTION
 	Converts profiles from a server to FSLogix containers using FRX.EXE.
+
+	Note that recent versions of FRX appear to be broken and will fail with "Error copying profile (0x00000001): Incorrect function."
+	Script is confirmed working with FRX.EXE 2.9.8612.60056. This can be downloaded from here:
+	  https://download.microsoft.com/download/9/7/b/97b4c64b-ffc9-447c-b39e-3afba4672ee8/FSLogix_Apps_2.9.8612.60056.zip
+	Install, copy FRX.EXE out of the installation folder. You can then uninstall.
+	You can have a current version installed. Just have a copy of the old FRX.EXE in an alternate path and use the frxpath parameter to specify its location.
+
 	Will extract a list of usernames from the ProfileList registry key, unless the -userlist or -searchbase options are specified.
 	The -userlist option specifies a text file containing a list of samAccountnames to convert.
 	The -searchbase option specifies an OU containing the user accounts to convert. Set to root to convert all user accounts in the domain.
@@ -105,6 +112,10 @@
 		Added -selectprofiles switch to allow interactive selection of profiles from the userlist.
 		Changes to progress visibility.
 		Minor changes to comments.
+
+	Version:	2.20250617.1
+		No functional changes.
+		Just added comments regarding issues with recent versions of FRX.
 
     .EXAMPLE
         .\convert-profiles -vhdpath \\server\share
