@@ -117,6 +117,10 @@
 		No functional changes.
 		Just added comments regarding issues with recent versions of FRX.
 
+	Version:	2.20250618.1
+		Change logging to use Out-File instead of Add-Content
+		Add-Content causing issues "Stream was not readable" and locking the file
+
     .EXAMPLE
         .\convert-profiles -vhdpath \\server\share
 
@@ -244,7 +248,8 @@ function out-log {
 	process {
 		foreach ($iobject in $iobjects)
 	        {
-			$iobject|add-content $logfile -passthru -Encoding $encoding |write-output
+			$iobject
+			$iobject|out-file $logfile -Encoding $encoding -Force -Append
 	        }
 	}
 }
@@ -513,6 +518,7 @@ if ($userlist) {
 			$objUser = $objSID.Translate( [System.Security.Principal.NTAccount])
 		} catch {
 			"SID $SID is invalid."|out-log
+			Continue
 		}
 		# We only want domain accounts
 		$username=$objUser.Value
