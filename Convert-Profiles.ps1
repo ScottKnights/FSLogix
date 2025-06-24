@@ -118,8 +118,13 @@
 		Just added comments regarding issues with recent versions of FRX.
 
 	Version:	2.20250618.1
-		Change logging to use Out-File instead of Add-Content
+		Change logging to use Out-File instead of Add-Content.
 		Add-Content causing issues "Stream was not readable" and locking the file
+
+	Version:	2.20250624.1
+		Remove Set-Content statement as it was causing file locking.
+		Allow verbose FRX logging on second attempt if first attempt doesn't return error code 0.
+		Minor logging changes.
 
     .EXAMPLE
         .\convert-profiles -vhdpath \\server\share
@@ -350,14 +355,23 @@ function convert-profile {
 		$returncode=$lastexitcode
 		if ($returncode -ne 0) {
 			"$username - FRX return code did not equal 0. Trying again."|out-log
-			& $frxpath copy-profile -filename "$fullpath" -sid "$sid" -dynamic 1 -size-mbs="$vhdsize" 2>&1 |out-null
+			if ($verbosefrx) {
+				& $frxpath copy-profile -filename "$fullpath" -sid "$sid" -dynamic 1 -size-mbs="$vhdsize" -verbose|out-log
+			} else {
+				& $frxpath copy-profile -filename "$fullpath" -sid "$sid" -dynamic 1 -size-mbs="$vhdsize" 2>&1 |out-null
+			}
 			$returncode=$lastexitcode
 			if ($returncode -ne 0) {
 				"$username - FRX return code still did not equal 0 - Investigate."|out-log
 				remove-item $fldname -erroraction silentlycontinue |out-null
 				return
+			} else {
+				"$username - FRX return code equals 0. Profile migrated."|out-log
 			}
+		} else {
+			"$username - FRX return code equals 0. Profile migrated."|out-log
 		}
+
 	} catch {
 		"$username - FRX returned an error - Investigate."|out-log
 		remove-item $fldname -erroraction silentlycontinue |out-null
@@ -398,7 +412,7 @@ $global:ProgressPreference="silentlycontinue"
 # Check that we can create the log file
 $start=get-date
 try {
-	set-Content -Path $logfile -encoding $encoding -Value "Start run at $start" -erroraction stop
+	"Start run at $start"|out-file $logfile -Encoding $encoding -Force
 } catch {
 	write-output "Cannot create log file $logfile. Check path and permissions. Exiting."
 	Return
@@ -571,6 +585,8 @@ foreach ($user in $users) {
 	$secondsRemaining = ($secondsElapsed.TotalSeconds / $counter) * ($numusers - $counter)
 }
 
+$End=Get-Date
+"End run at $end."|out-log
 $global:ProgressPreference=$InitProgressPreference
 
 #endregion Execute
