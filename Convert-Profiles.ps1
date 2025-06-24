@@ -126,6 +126,10 @@
 		Allow verbose FRX logging on second attempt if first attempt doesn't return error code 0.
 		Minor logging changes.
 
+	Version:	2.20250624.2
+		Change order of tests to test if the container exists before checking if user is logged in or NTUSER.DAT is locked.
+		Fix registry key deletion if -cleanorphan is specified so that it doesn't request confirmation.
+
     .EXAMPLE
         .\convert-profiles -vhdpath \\server\share
 
@@ -276,16 +280,6 @@ function convert-profile {
 		Return
 	}
 
-	# Return if user is logged on - Anyone know a better way to test for this? This works, but make me feel a bit dirty.
-	$ErrorActionPreference="Stop"
-	try {
-		query user $username 2>&1|out-null
-		"$username - Currently logged in."|out-log
-		Return
-	} catch {
-		$ErrorActionPreference="Continue"
-	}
-
 	# Return if no profile path registry value
 	$ErrorActionPreference="Stop"
 	try {
@@ -301,18 +295,10 @@ function convert-profile {
 	if (-NOT (test-path $profPath)) {
 		"$username - Profile path folder does not exist. Orphaned Profile."|out-log
 		if ($cleanorphan) {
-			remove-item -path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$sid" -force -erroraction silentlycontinue|out-null
+			"Cleanorphan specified. Deleting key HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$sid" |out-log
+			remove-item -path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$sid" -force -recurse -Confirm:$false -erroraction silentlycontinue|out-null
 		}
 		Return
-	}
-
-	# Return if NTUSER.DAT is locked
-	$ntuserdat="$profPath\ntuser.dat"
-	try {
-		[IO.File]::OpenWrite($ntuserdat).close()
-	 } catch {
-		"$username - NTUSER.DAT is locked."|out-log
-		return
 	}
 
 	# Form folder and VHD names
@@ -333,6 +319,25 @@ function convert-profile {
 	if (test-path $fullpath) {
 		"$username - FSLogix container already exists."|out-log
 		Return
+	}
+
+	# Return if user is logged on - Anyone know a better way to test for this? This works, but make me feel a bit dirty.
+	$ErrorActionPreference="Stop"
+	try {
+		query user $username 2>&1|out-null
+		"$username - Currently logged in."|out-log
+		Return
+	} catch {
+		$ErrorActionPreference="Continue"
+	}
+
+	# Return if NTUSER.DAT is locked
+	$ntuserdat="$profPath\ntuser.dat"
+	try {
+		[IO.File]::OpenWrite($ntuserdat).close()
+	 } catch {
+		"$username - NTUSER.DAT is locked."|out-log
+		return
 	}
 
 	"$username - Converting profile to container."|out-log
@@ -408,6 +413,10 @@ function convert-profile {
 clear-host
 $InitProgressPreference=$global:ProgressPreference
 $global:ProgressPreference="silentlycontinue"
+
+$VHDX=$True
+$reversefolder=$true
+$selectprofiles=$true
 
 # Check that we can create the log file
 $start=get-date
